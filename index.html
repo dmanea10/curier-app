@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Curier App</title>
+
+<style>
+body { font-family: Arial; padding:20px; background:#1a1a1a; color:#eee; max-width:500px; margin:auto;}
+.box { background:#2a2a2a; padding:15px; border-radius:12px; margin-bottom:15px;}
+h2,h3 { color:#00c2a8; margin-top:0;}
+input { background:#333; border:1px solid #444; color:white; padding:8px; border-radius:5px; width:90px;}
+button { background:#00c2a8; border:none; color:#fff; border-radius:8px; padding:10px; margin:5px; font-weight:bold;}
+.btn-small { background:#444;}
+.result-line { display:flex; justify-content:space-between; padding:5px 0;}
+.history-item { background:#333; padding:8px; margin-top:5px; border-radius:5px; font-size:0.85em;}
+canvas { width:100%; height:200px; background:#111; border-radius:10px; }
+</style>
+
+</head>
+
+<body>
+
+<h2>🚚 Curier App</h2>
+
+<div class="box">
+Intrare: <input type="time" id="start" value="10:00"><br>
+Ieșire: <input type="time" id="end" value="22:00"><br>
+Comenzi: <input type="number" id="orders" value="0">
+</div>
+
+<div class="box">
+<h3>💵 Cash: <span id="cash">0</span></h3>
+<button onclick="addCash(5)">+5</button>
+<button onclick="addCash(10)">+10</button>
+<button class="btn-small" onclick="addCash(-5)">-5</button><br>
+<input type="number" id="cashInput" placeholder="sumă">
+<button onclick="addCashCustom()">Adaugă</button>
+</div>
+
+<div class="box">
+<h3>💳 Online: <span id="online">0</span></h3>
+<button onclick="addOnline(5)">+5</button>
+<button onclick="addOnline(10)">+10</button>
+<button class="btn-small" onclick="addOnline(-5)">-5</button><br>
+<input type="number" id="onlineInput" placeholder="sumă">
+<button onclick="addOnlineCustom()">Adaugă</button>
+</div>
+
+<div class="box">
+<h3>Rezultat</h3>
+<div class="result-line">Ore: <span id="hours">0</span></div>
+<div class="result-line">Tips: <span id="totalTips">0</span></div>
+<div class="result-line">Lei/comandă: <span id="perOrder">0</span></div>
+<div class="result-line"><strong>Total: <span id="total">0</span></strong></div>
+<button onclick="saveDay()">Salvează ziua</button>
+<button onclick="reset()">Reset zi</button>
+</div>
+
+<div class="box">
+<h3>📊 Grafic venituri</h3>
+<canvas id="chart" width="400" height="200"></canvas>
+</div>
+
+<div class="box">
+<h3>Istoric</h3>
+<div id="history"></div>
+<button onclick="clearHistory()">Șterge</button>
+</div>
+
+<script>
+let cash=0, online=0;
+
+function addCash(x){ cash=Math.max(0,cash+x); update();}
+function addOnline(x){ online=Math.max(0,online+x); update();}
+
+function addCashCustom(){
+cash+=+document.getElementById("cashInput").value||0;
+document.getElementById("cashInput").value="";
+update();
+}
+
+function addOnlineCustom(){
+online+=+document.getElementById("onlineInput").value||0;
+document.getElementById("onlineInput").value="";
+update();
+}
+
+function update(){
+let s=document.getElementById("start").value;
+let e=document.getElementById("end").value;
+let orders=+document.getElementById("orders").value||0;
+
+let hours=0;
+if(s&&e){
+let sm=s.split(":"), em=e.split(":");
+let sMin=sm[0]*60+ +sm[1];
+let eMin=em[0]*60+ +em[1];
+if(eMin<sMin)eMin+=1440;
+hours=(eMin-sMin)/60;
+}
+
+let tips=cash+online;
+let perOrder=orders? (tips/orders).toFixed(2):0;
+
+document.getElementById("hours").innerText=hours.toFixed(2);
+document.getElementById("totalTips").innerText=tips;
+document.getElementById("total").innerText=tips;
+document.getElementById("perOrder").innerText=perOrder;
+document.getElementById("cash").innerText=cash;
+document.getElementById("online").innerText=online;
+
+drawChart();
+}
+
+function saveDay(){
+let h=JSON.parse(localStorage.getItem("d")||"[]");
+h.unshift({
+date:new Date().toISOString(),
+hours:document.getElementById("hours").innerText,
+total:document.getElementById("total").innerText
+});
+localStorage.setItem("d",JSON.stringify(h.slice(0,30)));
+
+render(); reset();
+}
+
+function render(){
+let h=JSON.parse(localStorage.getItem("d")||"[]");
+
+document.getElementById("history").innerHTML=
+h.map(x=>`<div class="history-item">${x.date.slice(0,10)} | ${x.hours}h | ${x.total} lei</div>`).join("");
+
+drawChart();
+}
+
+function drawChart(){
+let h=JSON.parse(localStorage.getItem("d")||"[]").slice(0,7).reverse();
+let c=document.getElementById("chart"), ctx=c.getContext("2d");
+ctx.clearRect(0,0,c.width,c.height);
+
+let max=Math.max(...h.map(x=>+x.total),1);
+let w=c.width/h.length;
+
+h.forEach((x,i)=>{
+let val=+x.total;
+let height=(val/max)*(c.height-20);
+ctx.fillStyle="#00c2a8";
+ctx.fillRect(i*w+10,c.height-height,w-20,height);
+});
+}
+
+function reset(){cash=0;online=0;document.getElementById("orders").value=0;update();}
+function clearHistory(){localStorage.removeItem("d");render();}
+
+document.querySelectorAll("input").forEach(i=>i.addEventListener("input",update));
+
+update(); render();
+</script>
+
+</body>
+</html>
