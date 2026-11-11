@@ -14,12 +14,44 @@ export default function Page(){
  useEffect(()=>{if(session)loadDay(date)},[date,session]);
  async function loadDay(d){const {data}=await supabase.from("work_days").select("*").eq("user_id",session.user.id).eq("work_date",d).maybeSingle();if(data){setStart(data.start_time?.slice(0,5)||"");setEnd(data.end_time?.slice(0,5)||"");setOrders(data.orders||0);setCash(Number(data.cash_tips)||0);setOnline(Number(data.online_tips)||0);setTemsHours(Number(data.tems_hours)||0);setTemsOrders(Number(data.tems_orders)||0);setTemsCash(Number(data.tems_cash)||0);setTemsOnline(Number(data.tems_online)||0)}else{setStart("");setEnd("");setOrders(0);setCash(0);setOnline(0);setTemsHours(0);setTemsOrders(0);setTemsCash(0);setTemsOnline(0)}}
  const latestRef=useRef(null);latestRef.current={date,start,end,orders,cash,online,temsHours,temsOrders,temsCash,temsOnline};
- async function save(v){setSaving(true);setSaveError("");const targetDate=v.date||date;const {error}=await supabase.from("work_days").upsert({user_id:session.user.id,work_date:targetDate,start_time:v.start||null,end_time:v.end||null,orders:Number(v.orders)||0,cash_tips:Number(v.cash)||0,online_tips:Number(v.online)||0,hours:hrs(v.start,v.end),tems_hours:Number(v.temsHours)||0,tems_orders:Number(v.temsOrders)||0,tems_cash:Number(v.temsCash)||0,tems_online:Number(v.temsOnline)||0,updated_at:new Date().toISOString()},{onConflict:"user_id,work_date"});if(error){setSaveError("Nu s-a salvat: "+error.message);setSaving(false);return}await load();setSaving(false)}
- function change(k,v){const x={...(latestRef.current||{}),[k]:v};latestRef.current=x;({start:setStart,end:setEnd,orders:setOrders,cash:setCash,online:setOnline}[k])(v);clearTimeout(window._t);setSaving(true);window._t=setTimeout(()=>save(x),300)}
+ const pendingSavesRef=useRef({});
+ const saveChainRef=useRef(Promise.resolve());
+ async function flushSaves(){
+  const run=async()=>{
+   while(Object.keys(pendingSavesRef.current).length){
+    const batch=pendingSavesRef.current;pendingSavesRef.current={};
+    for(const [targetDate,patch] of Object.entries(batch)){
+     const update={...patch,updated_at:new Date().toISOString()};
+     const {data,error}=await supabase.from("work_days").update(update).eq("user_id",session.user.id).eq("work_date",targetDate).select("id");
+     if(error){setSaveError("Nu s-a salvat: "+error.message);continue}
+     if(!data||data.length===0){
+      const defaults={user_id:session.user.id,work_date:targetDate,start_time:null,end_time:null,orders:0,cash_tips:0,online_tips:0,hours:0,tems_hours:0,tems_orders:0,tems_cash:0,tems_online:0};
+      const {error:insertError}=await supabase.from("work_days").insert({...defaults,...update});
+      if(insertError)setSaveError("Nu s-a salvat: "+insertError.message);
+     }
+    }
+   }
+   await load();setSaving(false);
+  };
+  saveChainRef.current=saveChainRef.current.then(run,run);
+  return saveChainRef.current;
+ }
+ function queueSave(targetDate,patch){
+  pendingSavesRef.current[targetDate]={...(pendingSavesRef.current[targetDate]||{}),...patch};
+  setSaving(true);clearTimeout(window._t);window._t=setTimeout(()=>flushSaves(),300);
+ }
+ function change(k,v){
+  const x={...(latestRef.current||{}),[k]:v};latestRef.current=x;
+  ({start:setStart,end:setEnd,orders:setOrders,cash:setCash,online:setOnline}[k])(v);
+  const columns={start:"start_time",end:"end_time",orders:"orders",cash:"cash_tips",online:"online_tips"};
+  const patch={[columns[k]]:k==="start"||k==="end"?(v||null):Number(v)||0};
+  if(k==="start"||k==="end")patch.hours=hrs(x.start,x.end);
+  queueSave(x.date||date,patch);
+ }
  function add(k,n){change(k,Number(k==="cash"?cash:online)+n)}
  function addOrders(){const raw=String(ordersAdd).trim();if(!raw)return;const amount=Number(raw);if(!Number.isInteger(amount)||amount<=0){alert("Introdu un număr întreg de comenzi mai mare decât 0.");return}change("orders",Number(orders||0)+amount);setOrdersAdd("")}
  function addCustomTip(k,raw,clear,tems=false){const normalized=String(raw).trim().replace(",",".");if(!normalized)return;const amount=Number(normalized);if(!Number.isFinite(amount)||amount<=0){alert("Introdu o sumă mai mare decât 0.");return}if(tems){const current=k==="temsCash"?temsCash:temsOnline;changeTems(k,Math.round((Number(current||0)+amount)*100)/100)}else{const current=k==="cash"?cash:online;change(k,Math.round((Number(current||0)+amount)*100)/100)}clear("")}
- function changeTems(k,v){const x={...(latestRef.current||{}),[k]:v};latestRef.current=x;({temsHours:setTemsHours,temsOrders:setTemsOrders,temsCash:setTemsCash,temsOnline:setTemsOnline}[k])(v);clearTimeout(window._tt);setSaving(true);window._tt=setTimeout(()=>save(x),300)}
+ function changeTems(k,v){const x={...(latestRef.current||{}),[k]:v};latestRef.current=x;({temsHours:setTemsHours,temsOrders:setTemsOrders,temsCash:setTemsCash,temsOnline:setTemsOnline}[k])(v);const columns={temsHours:"tems_hours",temsOrders:"tems_orders",temsCash:"tems_cash",temsOnline:"tems_online"};queueSave(x.date||date,{[columns[k]]:Number(v)||0})}
  async function auth(){setMsg("");if(!email||!email.includes("@"))return setMsg("Introdu o adresă de e-mail validă.");if(signup){if(pass.length<6)return setMsg("Parola trebuie să aibă cel puțin 6 caractere.");if(pass!==confirm)return setMsg("Parolele nu coincid.");const r=await supabase.auth.signUp({email,password:pass});if(r.error)setMsg(r.error.message);else{setMsg("Cont creat. Acum te poți autentifica.");setSignup(false);setPass("");setConfirm("")}}else{localStorage.setItem("tips_curier_email",email);const r=await supabase.auth.signInWithPassword({email,password:pass});if(r.error)setMsg(r.error.message)}}
  async function sendReset(){setMsg("");if(!email||!email.includes("@"))return setMsg("Introdu adresa de e-mail a contului.");const {error}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin});if(error)setMsg(error.message);else setMsg("Ți-am trimis un link pentru resetarea parolei. Verifică emailul.")}
  async function updatePassword(){setMsg("");if(pass.length<6)return setMsg("Parola trebuie să aibă cel puțin 6 caractere.");if(pass!==confirm)return setMsg("Parolele nu coincid.");const {error}=await supabase.auth.updateUser({password:pass});if(error)return setMsg(error.message);setMsg("Parola a fost schimbată. Te poți autentifica cu noua parolă.");setReset(false);setPass("");setConfirm("");window.history.replaceState({},document.title,window.location.pathname)}
